@@ -13,7 +13,6 @@ const Cr = Components.results;
 const helper = new Helper();
 
 const IDENTITY_NAME = 'JUGGLER ';
-const HUNDRED_YEARS = 60 * 60 * 24 * 365 * 100;
 
 const ALL_PERMISSIONS = [
   'geo',
@@ -165,8 +164,6 @@ export class TargetRegistry {
       target.updateOverridesForBrowsingContext(tab.linkedBrowser.browsingContext);
       if (!hasExplicitSize)
         target.updateViewportSize();
-      if (browserContext.videoRecordingOptions)
-        target._startVideoRecording(browserContext.videoRecordingOptions);
     };
 
     const onTabCloseListener = event => {
@@ -364,10 +361,6 @@ export class TargetRegistry {
       target = this._browserToTarget.get(browser);
     }
     browser.focus();
-    if (browserContext.crossProcessCookie.settings.timezoneId) {
-      if (await target.hasFailedToOverrideTimezone())
-        throw new Error('Failed to override timezone');
-    }
     didCreateFirstPage = true;
     return target.id();
   }
@@ -404,8 +397,7 @@ export class PageTarget {
     this._actor = undefined;
     this._actorSequenceNumber = 0;
     this._channel = new SimpleChannel(`browser::page[${this._targetId}]`, 'target-' + this._targetId);
-    this._videoRecordingInfo = undefined;
-    this._screencastRecordingInfo = undefined;
+    this._screencastId = undefined;
     this._dialogs = new Map();
     this.forcedColors = 'none';
     this.disableCache = false;
@@ -508,6 +500,8 @@ export class PageTarget {
   updateOverridesForBrowsingContext(browsingContext = undefined) {
     this.updateTouchOverride(browsingContext);
     this.updateUserAgent(browsingContext);
+    this.updateTimezoneOverride(browsingContext);
+    this.updateLanguageOverride(browsingContext);
     this.updatePlatform(browsingContext);
     this.updateDPPXOverride(browsingContext);
     this.updateZoom(browsingContext);
@@ -543,6 +537,14 @@ export class PageTarget {
 
   updateUserAgent(browsingContext = undefined) {
     (browsingContext || this._linkedBrowser.browsingContext).customUserAgent = this._browserContext.defaultUserAgent;
+  }
+
+  updateTimezoneOverride(browsingContext = undefined) {
+    (browsingContext || this._linkedBrowser.browsingContext).timezoneOverride = this._browserContext.timezoneOverride;
+  }
+
+  updateLanguageOverride(browsingContext = undefined) {
+    (browsingContext || this._linkedBrowser.browsingContext).languageOverride = this._browserContext.languageOverride;
   }
 
   updatePlatform(browsingContext = undefined) {
@@ -749,52 +751,9 @@ export class PageTarget {
     await this._channel.connect('').send('applyContextSetting', { name, value }).catch(e => void e);
   }
 
-  async hasFailedToOverrideTimezone() {
-    return await this._channel.connect('').send('hasFailedToOverrideTimezone').catch(e => true);
-  }
-
-  async _startVideoRecording({width, height, dir}) {
-    // On Mac the window may not yet be visible when TargetCreated and its
-    // NSWindow.windowNumber may be -1, so we wait until the window is known
-    // to be initialized and visible.
-    await this.windowReady();
-    const file = PathUtils.join(dir, helper.generateId() + '.webm');
-    if (width < 10 || width > 10000 || height < 10 || height > 10000)
-      throw new Error("Invalid size");
-
-    const docShell = this._gBrowser.ownerGlobal.docShell;
-    // Exclude address bar and navigation control from the video.
-    const rect = this.linkedBrowser().getBoundingClientRect();
-    const devicePixelRatio = this._window.devicePixelRatio;
-    let sessionId;
-    const registry = this._registry;
-    const screencastClient = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight) {
-      },
-      screencastStopped() {
-        registry.emit(TargetRegistry.Events.ScreencastStopped, sessionId);
-      },
-    };
-    const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    sessionId = screencastService.startVideoRecording(screencastClient, docShell, true, file, width, height, 0, viewport.width, viewport.height, devicePixelRatio * rect.top);
-    this._videoRecordingInfo = { sessionId, file };
-    this.emit(PageTarget.Events.ScreencastStarted);
-  }
-
-  _stopVideoRecording() {
-    if (!this._videoRecordingInfo)
-      throw new Error('No video recording in progress');
-    const videoRecordingInfo = this._videoRecordingInfo;
-    this._videoRecordingInfo = undefined;
-    screencastService.stopVideoRecording(videoRecordingInfo.sessionId);
-  }
-
-  videoRecordingInfo() {
-    return this._videoRecordingInfo;
-  }
-
   async startScreencast({ width, height, quality }) {
+    if (this._screencastId)
+      return;
     // On Mac the window may not yet be visible when TargetCreated and its
     // NSWindow.windowNumber may be -1, so we wait until the window is known
     // to be initialized and visible.
@@ -810,31 +769,29 @@ export class PageTarget {
     const self = this;
     const screencastClient = {
       QueryInterface: ChromeUtils.generateQI([Ci.nsIScreencastServiceClient]),
-      screencastFrame(data, deviceWidth, deviceHeight) {
-        if (self._screencastRecordingInfo)
-          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight });
+      screencastFrame(data, deviceWidth, deviceHeight, timestamp) {
+        if (self._screencastId)
+          self.emit(PageTarget.Events.ScreencastFrame, { data, deviceWidth, deviceHeight, timestamp });
       },
       screencastStopped() {
       },
     };
     const viewport = this._viewportSize || this._browserContext.defaultViewportSize || { width: 0, height: 0 };
-    const screencastId = screencastService.startVideoRecording(screencastClient, docShell, false, '', width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
-    this._screencastRecordingInfo = { screencastId };
-    return { screencastId };
+    this._screencastId = screencastService.startScreencast(screencastClient, docShell, width, height, quality || 90, viewport.width, viewport.height, devicePixelRatio * rect.top);
   }
 
-  screencastFrameAck({ screencastId }) {
-    if (!this._screencastRecordingInfo || this._screencastRecordingInfo.screencastId !== screencastId)
+  screencastFrameAck() {
+    if (!this._screencastId)
       return;
-    screencastService.screencastFrameAck(screencastId);
+    screencastService.screencastFrameAck(this._screencastId);
   }
 
   stopScreencast() {
-    if (!this._screencastRecordingInfo)
-      throw new Error('No screencast in progress');
-    const { screencastId } = this._screencastRecordingInfo;
-    this._screencastRecordingInfo = undefined;
-    screencastService.stopVideoRecording(screencastId);
+    if (!this._screencastId)
+      return;
+    const screencastId = this._screencastId;
+    this._screencastId = undefined;
+    screencastService.stopScreencast(screencastId);
   }
 
   ensureContextMenuClosed() {
@@ -855,10 +812,7 @@ export class PageTarget {
   dispose() {
     this.ensureContextMenuClosed();
     this._disposed = true;
-    if (this._videoRecordingInfo)
-      this._stopVideoRecording();
-    if (this._screencastRecordingInfo)
-      this.stopScreencast();
+    this.stopScreencast();
     this._browserContext.pages.delete(this);
     this._registry._browserToTarget.delete(this._linkedBrowser);
     this._registry._browserIdToTarget.delete(this._linkedBrowser.browsingContext.browserId);
@@ -875,7 +829,6 @@ export class PageTarget {
 }
 
 PageTarget.Events = {
-  ScreencastStarted: Symbol('PageTarget.ScreencastStarted'),
   ScreencastFrame: Symbol('PageTarget.ScreencastFrame'),
   Crashed: Symbol('PageTarget.Crashed'),
   DialogOpened: Symbol('PageTarget.DialogOpened'),
@@ -939,6 +892,8 @@ class BrowserContext {
     this.defaultViewportSize = undefined;
     this.deviceScaleFactor = undefined;
     this.defaultUserAgent = null;
+    this.timezoneOverride = undefined;
+    this.languageOverride = undefined;
     this.defaultPlatform = null;
     this.touchOverride = false;
     this.forceOffline = false;
@@ -947,7 +902,6 @@ class BrowserContext {
     this.forcedColors = 'none';
     this.reducedMotion = 'none';
     this.contrast = 'none';
-    this.videoRecordingOptions = undefined;
     this.crossProcessCookie = {
       initScripts: [],
       bindings: [],
@@ -1023,9 +977,9 @@ class BrowserContext {
     if (ignoreHTTPSErrors) {
       Preferences.set("network.stricttransportsecurity.preloadlist", false);
       Preferences.set("security.cert_pinning.enforcement_level", 0);
-      certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(true, this.userContextId);
+      certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyDataForUserContext(this.userContextId, true);
     } else {
-      certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(false, this.userContextId);
+      certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyDataForUserContext(this.userContextId, false);
     }
   }
 
@@ -1033,6 +987,20 @@ class BrowserContext {
     this.defaultUserAgent = userAgent;
     for (const page of this.pages)
       page.updateUserAgent();
+  }
+
+  setTimezoneOverride(timezoneId) {
+    if (!Intl.supportedValuesOf("timeZone").includes(timezoneId))
+      throw new Error(`Invalid timezone ID: ${timezoneId}`);
+    this.timezoneOverride = timezoneId;
+    for (const page of this.pages)
+      page.updateTimezoneOverride();
+  }
+
+  setLanguageOverride(locale) {
+    this.languageOverride = locale;
+    for (const page of this.pages)
+      page.updateLanguageOverride();
   }
 
   setDefaultPlatform(platform) {
@@ -1124,7 +1092,8 @@ class BrowserContext {
 
   setCookies(cookies) {
     const protocolToSameSite = {
-      [undefined]: Ci.nsICookie.SAMESITE_NONE,
+      [undefined]: Ci.nsICookie.SAMESITE_UNSET,
+      'None': Ci.nsICookie.SAMESITE_UNSET,
       'Lax': Ci.nsICookie.SAMESITE_LAX,
       'Strict': Ci.nsICookie.SAMESITE_STRICT,
     };
@@ -1152,7 +1121,10 @@ class BrowserContext {
         secure,
         cookie.httpOnly || false,
         cookie.expires === undefined || cookie.expires === -1 /* isSession */,
-        cookie.expires === undefined ? Date.now() + HUNDRED_YEARS : cookie.expires,
+        // The XPCOM interface requires the expiry field even for session cookies.
+        // The expiry value must be passed in milliseconds and is capped at 400
+        // days.
+        cookie.expires === undefined ? Number.MAX_SAFE_INTEGER : Services.cookies.maybeCapExpiry(cookie.expires * 1000),
         { userContextId: this.userContextId || undefined } /* originAttributes */,
         protocolToSameSite[cookie.sameSite],
         Ci.nsICookie.SCHEME_UNSET
@@ -1167,6 +1139,7 @@ class BrowserContext {
   getCookies() {
     const result = [];
     const sameSiteToProtocol = {
+      [Ci.nsICookie.SAMESITE_UNSET]: 'None',
       [Ci.nsICookie.SAMESITE_NONE]: 'None',
       [Ci.nsICookie.SAMESITE_LAX]: 'Lax',
       [Ci.nsICookie.SAMESITE_STRICT]: 'Strict',
@@ -1181,7 +1154,7 @@ class BrowserContext {
         value: cookie.value,
         domain: cookie.host,
         path: cookie.path,
-        expires: cookie.isSession ? -1 : cookie.expiry,
+        expires: cookie.isSession ? -1 : cookie.expiry / 1000,
         size: cookie.name.length + cookie.value.length,
         httpOnly: cookie.isHttpOnly,
         secure: cookie.isSecure,
@@ -1192,14 +1165,14 @@ class BrowserContext {
     return result;
   }
 
-  async setVideoRecordingOptions(options) {
-    this.videoRecordingOptions = options;
+  async setScreencastOptions(options) {
+    this.screencastOptions = options;
     const promises = [];
     for (const page of this.pages) {
       if (options)
-        promises.push(page._startVideoRecording(options));
-      else if (page._videoRecordingInfo)
-        promises.push(page._stopVideoRecording());
+        promises.push(page.startScreencast(options));
+      else
+        promises.push(page.stopScreencast());
     }
     await Promise.all(promises);
   }
@@ -1291,5 +1264,4 @@ TargetRegistry.Events = {
   TargetDestroyed: Symbol('TargetRegistry.Events.TargetDestroyed'),
   DownloadCreated: Symbol('TargetRegistry.Events.DownloadCreated'),
   DownloadFinished: Symbol('TargetRegistry.Events.DownloadFinished'),
-  ScreencastStopped: Symbol('TargetRegistry.ScreencastStopped'),
 };

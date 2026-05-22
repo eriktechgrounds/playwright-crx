@@ -16,9 +16,9 @@
 
 import os from 'os';
 import * as util from 'util';
-import { getPlaywrightVersion } from '../../packages/playwright-core/lib/server/utils/userAgent';
+import { getPlaywrightVersion } from '../../packages/playwright-core/lib/coreBundle';
 import { expect, playwrightTest as base } from '../config/browserTest';
-import { kTargetClosedErrorMessage } from 'tests/config/errors';
+import { kTargetClosedErrorMessage } from '../config/errors';
 
 const it = base.extend({
   context: async ({}, use) => {
@@ -70,7 +70,7 @@ it('should support global timeout option', async ({ playwright, server }) => {
   const request = await playwright.request.newContext({ timeout: 100 });
   server.setRoute('/empty.html', (req, res) => {});
   const error = await request.get(server.EMPTY_PAGE).catch(e => e);
-  expect(error.message).toContain('Request timed out after 100ms');
+  expect(error.message).toContain('apiRequestContext.get: Timeout 100ms exceeded');
   await request.dispose();
 });
 
@@ -87,6 +87,28 @@ it('should propagate extra http headers with redirects', async ({ playwright, se
   expect(req1.headers['my-secret']).toBe('Value');
   expect(req2.headers['my-secret']).toBe('Value');
   expect(req3.headers['my-secret']).toBe('Value');
+  await request.dispose();
+});
+
+it('should preserve authorization on same-origin redirect but strip on cross-origin', async ({ playwright, server }) => {
+  server.setRedirect('/same/redirect', '/same/dest');
+  server.setRedirect('/cross/redirect', server.CROSS_PROCESS_PREFIX + '/cross/dest');
+  const request = await playwright.request.newContext({
+    extraHTTPHeaders: { 'Authorization': 'Bearer secret' },
+  });
+
+  const [sameDestReq] = await Promise.all([
+    server.waitForRequest('/same/dest'),
+    request.get(`${server.PREFIX}/same/redirect`),
+  ]);
+  expect(sameDestReq.headers['authorization']).toBe('Bearer secret');
+
+  const [crossDestReq] = await Promise.all([
+    server.waitForRequest('/cross/dest'),
+    request.get(`${server.PREFIX}/cross/redirect`),
+  ]);
+  expect(crossDestReq.headers['authorization']).toBeUndefined();
+
   await request.dispose();
 });
 
@@ -255,7 +277,9 @@ it('should set playwright as user-agent', async ({ playwright, server, isWindows
 });
 
 it('should be able to construct with context options', async ({ playwright, browserType, server }) => {
-  const request = await playwright.request.newContext((browserType as any)._playwright._defaultContextOptions);
+  const defaultContextOptions = {};
+  await (playwright as any)._instrumentation.runBeforeCreateRequestContext(defaultContextOptions);
+  const request = await playwright.request.newContext(defaultContextOptions);
   const response = await request.get(server.EMPTY_PAGE);
   expect(response.ok()).toBeTruthy();
   await request.dispose();
@@ -283,7 +307,7 @@ it('should abort requests when context is disposed', async ({ playwright, server
   ]);
   for (const result of results.slice(0, -1)) {
     expect(result instanceof Error).toBeTruthy();
-    expect(result.message).toContain(kTargetClosedErrorMessage);
+    expect(result.message).toContain('Request context disposed.');
   }
   await connectionClosed;
   await request.dispose();

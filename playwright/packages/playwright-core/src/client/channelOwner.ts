@@ -1,7 +1,7 @@
 /**
  * Copyright (c) Microsoft Corporation.
  *
- * Licensed under the Apache License, Version 2.0 (the 'License");
+ * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
+import { getMetainfo } from '@isomorphic/protocolMetainfo';
+import { stringifyStackFrames } from '@isomorphic/stackTrace';
 import { EventEmitter } from './eventEmitter';
 import { ValidationError, maybeFindValidator  } from '../protocol/validator';
-import { methodMetainfo } from '../utils/isomorphic/protocolMetainfo';
 import { captureLibraryStackTrace } from './clientStackTrace';
-import { stringifyStackFrames } from '../utils/isomorphic/stackTrace';
 
 import type { ClientInstrumentation } from './clientInstrumentation';
 import type { Connection } from './connection';
 import type { Logger } from './types';
 import type { ValidatorContext } from '../protocol/validator';
-import type { Platform } from './platform';
+import type { Platform } from '@isomorphic/platform';
 import type * as channels from '@protocol/channels';
 import { currentZone } from '../utils';
 
@@ -148,7 +148,7 @@ export abstract class ChannelOwner<T extends channels.Channel = channels.Channel
       get: (obj: any, prop: string | symbol) => {
         if (typeof prop === 'string') {
           const validator = maybeFindValidator(this._type, prop, 'Params');
-          const { internal } = methodMetainfo.get(this._type + '.' + prop) || {};
+          const { internal } = getMetainfo({ type: this._type, method: prop }) || {};
           if (validator) {
             return async (params: any) => {
               return await this._wrapApiCall(async apiZone => {
@@ -208,10 +208,6 @@ export abstract class ChannelOwner<T extends channels.Channel = channels.Channel
       }
       throw e;
     }
-  }
-
-  _toImpl(): any {
-    return this._connection.toImpl?.(this);
   }
 
   private toJSON() {
