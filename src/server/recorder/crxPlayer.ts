@@ -31,6 +31,7 @@ import type { ActionInContext, FrameDescription } from '@recorder/actions';
 import { toClickOptions } from 'playwright-core/lib/server/recorder/recorderRunner';
 import { parseAriaSnapshotUnsafe } from '@isomorphic/ariaSnapshot';
 import { nullProgress } from 'playwright-core/lib/server/progress';
+import type { Progress } from 'playwright-core/lib/server/progress';
 import type { Crx } from '../crx';
 import type { InstrumentationListener } from 'playwright-core/lib/server/instrumentation';
 import { traceParamsForAction } from './recorderUtils';
@@ -150,7 +151,7 @@ export default class CrxPlayer extends EventEmitter {
   private async _performAction(browserContext: BrowserContext, actionInContext: PerformAction) {
     this._checkStopped();
 
-    const innerPerformAction = async (mainFrame: Frame | null, actionInContext: PerformAction, cb: (callMetadata: CallMetadata) => Promise<any>): Promise<void> => {
+    const innerPerformAction = async (mainFrame: Frame | null, actionInContext: PerformAction, cb: (progress: Progress) => Promise<any>): Promise<void> => {
       // we must use the default browser context here!
       const context = mainFrame ?? browserContext;
 
@@ -173,11 +174,17 @@ export default class CrxPlayer extends EventEmitter {
         ...traceParams,
       };
 
+      const progress: Progress = {
+        ...nullProgress,
+        metadata: callMetadata,
+        log: message => callMetadata.log.push(message),
+      };
+
       try {
         this._checkStopped();
         await context.instrumentation.onBeforeCall(context, callMetadata);
         this._checkStopped();
-        await cb(callMetadata);
+        await cb(progress);
       } catch (e) {
         callMetadata.error = serializeError(e);
       } finally {
@@ -199,17 +206,17 @@ export default class CrxPlayer extends EventEmitter {
       return await innerPerformAction(null, actionInContext, () => Promise.resolve());
 
     if (action.name === 'openPage') {
-      return await innerPerformAction(null, actionInContext, async callMetadata => {
+      return await innerPerformAction(null, actionInContext, async progress => {
         const pageAlias = actionInContext.frame.pageAlias;
         if ([...pageAliases.values()].includes(pageAlias))
           throw new Error(`Page with alias ${pageAlias} already exists`);
-        const newPage = await context.newPage(callMetadata);
+        const newPage = await context.newPage(progress);
         if (action.url && action.url !== 'about:blank' && action.url !== 'chrome://newtab/') {
-          const navigateCallMetadata = {
-            ...callMetadata,
+          const navigateProgress: Progress = {
+            ...progress,
             ...traceParamsForAction({ ...actionInContext, action: { name: 'navigate', url: action.url } } as ActionInContext),
           };
-          await newPage.mainFrame().goto(navigateCallMetadata, action.url, { timeout: kActionTimeout });
+          await newPage.mainFrame().goto(navigateProgress, action.url, { timeout: kActionTimeout });
         }
         pageAliases.set(newPage, pageAlias);
       });
@@ -222,12 +229,12 @@ export default class CrxPlayer extends EventEmitter {
     const mainFrame = page.mainFrame();
 
     if (action.name === 'navigate')
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.goto(callMetadata, action.url, { timeout: kActionTimeout }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.goto(progress, action.url, { timeout: kActionTimeout }));
 
     if (action.name === 'closePage') {
-      return await innerPerformAction(mainFrame, actionInContext, async callMetadata => {
+      return await innerPerformAction(mainFrame, actionInContext, async progress => {
         pageAliases.delete(page);
-        await page.close(callMetadata, { runBeforeUnload: true });
+        await page.close(progress, { runBeforeUnload: true });
       });
     }
 
@@ -235,27 +242,27 @@ export default class CrxPlayer extends EventEmitter {
 
     if (action.name === 'click') {
       const options = toClickOptions(action);
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.click(callMetadata, selector, { ...options, timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.click(progress, selector, { ...options, timeout: kActionTimeout, strict: true }));
     }
     if (action.name === 'press') {
       const modifiers = toKeyboardModifiers(action.modifiers);
       const shortcut = [...modifiers, action.key].join('+');
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.press(callMetadata, selector, shortcut, { timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.press(progress, selector, shortcut, { timeout: kActionTimeout, strict: true }));
     }
     if (action.name === 'fill')
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.fill(callMetadata, selector, action.text, { timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.fill(progress, selector, action.text, { timeout: kActionTimeout, strict: true }));
     if (action.name === 'setInputFiles')
       return await innerPerformAction(mainFrame, actionInContext, () => Promise.reject(new Error(`player does not support setInputFiles yet`)));
     if (action.name === 'check')
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.check(callMetadata, selector, { timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.check(progress, selector, { timeout: kActionTimeout, strict: true }));
     if (action.name === 'uncheck')
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.uncheck(callMetadata, selector, { timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.uncheck(progress, selector, { timeout: kActionTimeout, strict: true }));
     if (action.name === 'select') {
       const values = action.options.map((value: any) => ({ value }));
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.selectOption(callMetadata, selector, [], values, { timeout: kActionTimeout, strict: true }));
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.selectOption(progress, selector, [], values, { timeout: kActionTimeout, strict: true }));
     }
     if (action.name === 'assertChecked') {
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.expect(callMetadata, selector, {
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.expect(progress, selector, {
         selector,
         expression: 'to.be.checked',
         expectedValue: { checked: true },
@@ -264,7 +271,7 @@ export default class CrxPlayer extends EventEmitter {
       }));
     }
     if (action.name === 'assertText') {
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.expect(callMetadata, selector, {
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.expect(progress, selector, {
         selector,
         expression: 'to.have.text',
         expectedText: serializeExpectedTextValues([action.text], { matchSubstring: true, normalizeWhiteSpace: true }),
@@ -273,7 +280,7 @@ export default class CrxPlayer extends EventEmitter {
       }));
     }
     if (action.name === 'assertValue') {
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.expect(callMetadata, selector, {
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.expect(progress, selector, {
         selector,
         expression: 'to.have.value',
         expectedText: serializeExpectedTextValues([action.value], { matchSubstring: false, normalizeWhiteSpace: true }),
@@ -282,7 +289,7 @@ export default class CrxPlayer extends EventEmitter {
       }));
     }
     if (action.name === 'assertVisible') {
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.expect(callMetadata, selector, {
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.expect(progress, selector, {
         selector,
         expression: 'to.be.visible',
         isNot: false,
@@ -290,7 +297,7 @@ export default class CrxPlayer extends EventEmitter {
       }));
     }
     if (action.name === 'assertSnapshot') {
-      return await innerPerformAction(mainFrame, actionInContext, callMetadata => mainFrame.expect(callMetadata, selector, {
+      return await innerPerformAction(mainFrame, actionInContext, progress => mainFrame.expect(progress, selector, {
         selector,
         expression: 'to.match.aria',
         expectedValue: parseAriaSnapshotUnsafe(yaml, action.snapshot),

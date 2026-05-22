@@ -73,6 +73,10 @@ export class CrxRecorderApp extends EventEmitter {
     this._crx.player.on('start', () => {
       this._recorder.clearErrors();
       this.resetCallLogs().catch(() => {});
+      this._updatePausedState();
+    });
+    this._crx.player.on('stop', () => {
+      this._updatePausedState();
     });
     this._wireListeners(recorder);
   }
@@ -146,6 +150,7 @@ export class CrxRecorderApp extends EventEmitter {
       this.emit('modeChanged', { mode });
     }
     this._sendMessage({ type: 'recorder', method: 'setMode', mode });
+    this._updatePausedState();
   }
 
   private _wireListeners(recorder: Recorder) {
@@ -166,9 +171,6 @@ export class CrxRecorderApp extends EventEmitter {
     });
     recorder.on(RecorderEvent.CallLogsUpdated, (callLogs: CallLog[]) => {
       this.updateCallLogs(callLogs);
-    });
-    recorder.on(RecorderEvent.UserSourcesChanged, (sources: Source[]) => {
-      this.setSources(sources);
     });
     recorder.on(RecorderEvent.ActionAdded, (action: ActionInContext) => {
       this._recordedActions.push(action);
@@ -191,6 +193,7 @@ export class CrxRecorderApp extends EventEmitter {
     this.setSources(sources);
     if (this._recorder._isRecording())
       this._updateCode(null);
+    this._updatePausedState();
   }
 
   private _generateSources(): Source[] {
@@ -299,10 +302,7 @@ export class CrxRecorderApp extends EventEmitter {
           break;
         case 'setMode':
           const { mode } = params;
-          if (this._mode !== mode) {
-            this._mode = mode;
-            this.emit('modeChanged', { mode });
-          }
+          this._recorder.setMode(mode).catch(() => {});
           break;
       }
 
@@ -320,6 +320,11 @@ export class CrxRecorderApp extends EventEmitter {
     }
     const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito });
     await this._crx.player.run(crxApp._context, this._getActions());
+  }
+
+  private _updatePausedState() {
+    const canPlay = !this._recorder._isRecording() && !this._crx.player.isPlaying() && this._recordedActions.length > 0;
+    this._sendMessage({ type: 'recorder', method: 'setPaused', paused: canPlay });
   }
 
   _sendMessage(msg: RecorderMessage) {
