@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { isRegExp } from 'playwright-core/lib/utils';
+import { isRegExp } from '@isomorphic/rtti';
 
 import { requireOrImport, setSingleTSConfig, setTransformConfig } from '../transform/transform';
 import { errorWithFile, fileIsModule } from '../util';
@@ -34,6 +34,7 @@ export const defineConfig = (...configs: any[]) => {
   let result = configs[0];
   for (let i = 1; i < configs.length; ++i) {
     const config = configs[i];
+    const prevProjects = result.projects;
     result = {
       ...result,
       ...config,
@@ -63,7 +64,7 @@ export const defineConfig = (...configs: any[]) => {
       projectOverrides.set(project.name, project);
 
     const projects = [];
-    for (const project of result.projects || []) {
+    for (const project of prevProjects || []) {
       const projectOverride = projectOverrides.get(project.name);
       if (projectOverride) {
         projects.push({
@@ -127,7 +128,8 @@ export async function loadConfig(location: ConfigLocation, overrides?: ConfigCLI
   // 3. Load transform options from the playwright config.
   const babelPlugins = (userConfig as any)['@playwright/test']?.babelPlugins || [];
   const external = userConfig.build?.external || [];
-  setTransformConfig({ babelPlugins, external });
+  const jsxImportSource = path.dirname(require.resolve('playwright'));
+  setTransformConfig({ babelPlugins, external, jsxImportSource });
   if (!overrides?.tsconfig)
     setSingleTSConfig(fullConfig?.singleTSConfigPath);
 

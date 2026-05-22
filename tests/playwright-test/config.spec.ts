@@ -552,6 +552,18 @@ test('should throw when workers option is invalid', async ({ runInlineTest }) =>
   expect(result.output).toContain('config.workers must be a number or percentage');
 });
 
+test('should throw when workers is negative via CLI (regression for #39938)', async ({ runInlineTest }) => {
+  const result = await runInlineTest({
+    'playwright.config.ts': `module.exports = {};`,
+    'a.test.ts': `
+      import { test } from '@playwright/test';
+      test('pass', () => {});
+    `,
+  }, { workers: -1 });
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain('Workers must be a positive number');
+});
+
 test('should work with undefined values and base', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'playwright.config.ts': `
@@ -661,8 +673,8 @@ test('should merge configs', async ({ runInlineTest }) => {
         use: { foo: 1, bar: 2 },
         expect: { timeout: 12 },
         projects: [
-          { name: 'B', timeout: 40, use: {} },
-          { name: 'A', timeout: 50, use: {} }
+          { name: 'A', timeout: 50, use: {} },
+          { name: 'B', timeout: 40 },
         ],
         webServer: [{
           command: 'echo 123',
@@ -671,6 +683,33 @@ test('should merge configs', async ({ runInlineTest }) => {
 
       // Should not add an empty project list.
       expect(defineConfig({}, {}).projects).toBeUndefined();
+    `,
+    'a.test.ts': `
+      import { test } from '@playwright/test';
+      test('pass', async ({}) => {});
+    `
+  });
+  expect(result.exitCode).toBe(0);
+});
+
+test('should merge projects in the config', async ({ runInlineTest }) => {
+  const result = await runInlineTest({
+    'playwright.config.ts': `
+      import { defineConfig, expect } from '@playwright/test';
+      const baseConfig = defineConfig({
+        projects: [{ name: 'A', timeout: 5_000 }, { name: 'B', timeout: 6_000 }],
+      });
+      const derivedConfig = defineConfig(baseConfig, {
+        projects: [{ name: 'A', timeout: 7_000 }, { name: 'C', timeout: 8_000 }],
+      });
+
+      expect(derivedConfig).toEqual(expect.objectContaining({
+        projects: [
+          { name: 'A', timeout: 7_000, use: {} },
+          { name: 'B', timeout: 6_000 },
+          { name: 'C', timeout: 8_000 },
+        ],
+      }));
     `,
     'a.test.ts': `
       import { test } from '@playwright/test';

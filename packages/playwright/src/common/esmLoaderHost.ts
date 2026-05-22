@@ -27,6 +27,11 @@ export function registerESMLoader() {
   if (process.env.PW_DISABLE_TS_ESM)
     return true;
 
+  // Transpilation in `bun` is not necessary, and trying to register a hook would cause issues.
+  // https://github.com/oven-sh/bun/issues/8222#issuecomment-3665364677
+  if ('Bun' in globalThis)
+    return true;
+
   if (loaderChannel)
     return true;
 
@@ -36,7 +41,7 @@ export function registerESMLoader() {
 
   const { port1, port2 } = new MessageChannel();
   // register will wait until the loader is initialized.
-  register(url.pathToFileURL(require.resolve('../transform/esmLoader')), {
+  register(url.pathToFileURL(require.resolve('../transform/esmLoader.js')), {
     data: { port: port2 },
     transferList: [port2],
   });
