@@ -38,6 +38,7 @@ import { languageSet } from 'playwright-core/lib/server/codegen/languages';
 import { deviceDescriptors } from 'playwright-core/lib/server/deviceDescriptors';
 import type { DeviceDescriptor } from 'playwright-core/lib/server/types';
 import type { LanguageGeneratorOptions } from 'playwright-core/lib/server/codegen/types';
+import { nullProgress } from 'playwright-core/lib/server/progress';
 
 const kTabIdSymbol = Symbol('kTabIdSymbol');
 
@@ -80,7 +81,7 @@ export class Crx extends SdkObject {
       };
       const browserOptions: BrowserOptions = {
         name: 'chromium',
-        isChromium: true,
+        browserType: 'chromium',
         headful: true,
         persistent: newContextOptions,
         browserProcess,
@@ -137,7 +138,7 @@ export class Crx extends SdkObject {
       // ensure we create and initialize the new context before the Target.attachedToTarget event is emitted
       assert(browserContextId);
       context = new CRBrowserContext(browser, browserContextId, options ?? {});
-      await context._initialize();
+      await context.initialize();
       browser._contexts.set(browserContextId, context);
     });
     context.on(BrowserContext.Events.Close, () => {
@@ -312,7 +313,7 @@ export class CrxApplication extends SdkObject {
       await Promise.all(this._crPages().map(crPage => options?.closePages ? crPage.closePage(false) : this._doDetach(crPage._targetId)));
     }
 
-    await this._context.close({});
+    await this._context.close(nullProgress, {});
   }
 
   list(code: string) {

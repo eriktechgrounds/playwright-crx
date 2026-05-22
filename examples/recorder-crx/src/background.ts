@@ -161,10 +161,12 @@ async function setTestIdAttributeName(testIdAttributeName: string) {
 
 chrome.action.onClicked.addListener(attach);
 
-chrome.contextMenus.create({
-  id: 'pw-recorder',
-  title: 'Attach to Playwright Recorder',
-  contexts: ['all'],
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'pw-recorder',
+    title: 'Attach to Playwright Recorder',
+    contexts: ['all'],
+  });
 });
 
 chrome.contextMenus.onClicked.addListener(async (_, tab) => {
