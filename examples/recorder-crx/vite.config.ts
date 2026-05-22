@@ -22,6 +22,7 @@ import sourcemaps from 'rollup-plugin-sourcemaps';
 // https://vitejs.dev/config/
 export default defineConfig({
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
       '@isomorphic': path.resolve(__dirname, '../../playwright/packages/isomorphic'),
       '@protocol': path.resolve(__dirname, '../../playwright/packages/protocol/src'),

@@ -36,7 +36,7 @@ PageBinding.kBindingName = '__crx__binding__';
 
 const playwright = new CrxPlaywright();
 
-const clientConnection = new CrxConnection(nodePlatform);
+const clientConnection = new CrxConnection(nodePlatform(''));
 const dispatcherConnection = new DispatcherConnection(true /* local */);
 
 // Dispatch synchronously at first.

@@ -90,6 +90,40 @@ export default defineConfig({
     'require.resolve': 'Boolean',
   },
   plugins: [
+    {
+      name: 'replace-playwright-package-ts',
+      enforce: 'pre',
+      resolveId(source, importer) {
+        if (!importer)
+          return null;
+        // Stub remote server modules to break circular dependency with browser.ts
+        if (source.endsWith('/playwrightPipeServer') || source.endsWith('/playwrightWebSocketServer')) {
+          const resolved = path.resolve(path.dirname(importer), source);
+          if (resolved.includes('playwright/packages/playwright-core/src/remote/'))
+            return path.resolve(__dirname, './src/shims/remoteServers.ts');
+        }
+        if (source.endsWith('/package') || source === './package' || source === '../package') {
+          const resolved = path.resolve(path.dirname(importer), source);
+          if (resolved === path.resolve(__dirname, './playwright/packages/playwright-core/src/package'))
+            return path.resolve(__dirname, './src/shims/playwright-core-package.ts');
+        }
+        return null;
+      },
+      transform(code, id) {
+        // registry/index.ts changed from static require('../../../browsers.json') to
+        // dynamic require(path.join(packageRoot, 'browsers.json')) in v1.60.0.
+        // Restore to static path so commonjs plugin can resolve it at build time.
+        if (id.includes('server/registry/index.ts') && code.includes("require(path.join(packageRoot, 'browsers.json'))")) {
+          return {
+            code: code.replace(
+              /require\(path\.join\(packageRoot,\s*'browsers\.json'\)\)/,
+              "require('../../../browsers.json')"
+            ),
+            map: null,
+          };
+        }
+      }
+    } as Plugin<any>,
     replace({
       'preventAssignment': true,
       '__dirname': id => {
