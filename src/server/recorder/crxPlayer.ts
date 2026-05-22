@@ -17,7 +17,10 @@
 import EventEmitter from 'events';
 import type { BrowserContext } from 'playwright-core/lib/server/browserContext';
 import { Page } from 'playwright-core/lib/server/page';
-import { createGuid, isUnderTest, ManualPromise, monotonicTime, serializeExpectedTextValues } from 'playwright-core/lib/utils';
+import { createGuid, isUnderTest } from 'playwright-core/lib/utils';
+import { ManualPromise } from '@isomorphic/manualPromise';
+import { monotonicTime } from '@isomorphic/time';
+import { serializeExpectedTextValues } from '@isomorphic/expectUtils';
 import type { Frame } from 'playwright-core/lib/server/frames';
 import type { CallMetadata } from '@protocol/callMetadata';
 import { serializeError } from 'playwright-core/lib/server/errors';
@@ -26,8 +29,8 @@ import { toKeyboardModifiers } from 'playwright-core/lib/server/codegen/language
 import type { ActionInContextWithLocation, Location } from './parser';
 import type { ActionInContext, FrameDescription } from '@recorder/actions';
 import { toClickOptions } from 'playwright-core/lib/server/recorder/recorderRunner';
-import { parseAriaSnapshotUnsafe } from 'playwright-core/lib/utils/isomorphic/ariaSnapshot';
-import { serverSideCallMetadata } from 'playwright-core/lib/server';
+import { parseAriaSnapshotUnsafe } from '@isomorphic/ariaSnapshot';
+import { nullProgress } from 'playwright-core/lib/server/progress';
 import type { Crx } from '../crx';
 import type { InstrumentationListener } from 'playwright-core/lib/server/instrumentation';
 import { traceParamsForAction } from './recorderUtils';
@@ -83,7 +86,7 @@ export default class CrxPlayer extends EventEmitter {
       context = page.context();
     } else {
       context = pageOrContext;
-      page = context.pages()[0] ?? await context.newPage(serverSideCallMetadata());
+      page = context.pages()[0] ?? await context.newPage(nullProgress);
     }
 
     const crxApp = await this._crx.get({ incognito: false });

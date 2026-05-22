@@ -16,7 +16,9 @@
 
 import 'playwright-core/lib/protocol/validator';
 
-import { scheme, tArray, tBoolean, tChannel, tEnum, tNumber, tObject, tOptional, tString } from 'playwright-core/lib/protocol/validatorPrimitives';
+import { scheme, tArray, tBoolean, tChannel, tEnum, tFloat, tObject, tOptional, tString } from 'playwright-core/lib/protocol/validatorPrimitives';
+
+const tNumber = tFloat;
 
 const tBrowserContextOptions = () => tObject({
   colorScheme: tOptional(tEnum(['dark', 'light', 'no-preference'])),

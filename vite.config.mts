@@ -26,6 +26,9 @@ const baseDir = __dirname.replace(/\\/g, '/');
 export default defineConfig({
   resolve: {
     alias: {
+      'playwright-core/lib/utils': path.resolve(__dirname, './playwright/packages/utils'),
+      '@utils': path.resolve(__dirname, './playwright/packages/utils'),
+      '@isomorphic': path.resolve(__dirname, './playwright/packages/isomorphic'),
       'playwright-core/lib': path.resolve(__dirname, './playwright/packages/playwright-core/src'),
       '@playwright/test/lib': path.resolve(__dirname, './playwright/packages/playwright/src'),
       'playwright-core': path.resolve(__dirname, './src/index'),
@@ -74,6 +77,13 @@ export default defineConfig({
       'node:module': path.resolve(__dirname, './src/shims/module'),
       'node:stream': path.resolve(__dirname, './node_modules/readable-stream'),
       'node:string_decoder': path.resolve(__dirname, './node_modules/string_decoder'),
+      'node:crypto': path.resolve(__dirname, './node_modules/crypto-browserify'),
+      'node:tls': path.resolve(__dirname, './src/shims/tls'),
+      'node:url': path.resolve(__dirname, './src/shims/url'),
+      'node:process': path.resolve(__dirname, './node_modules/process'),
+      'node:child_process': path.resolve(__dirname, './src/shims/child_process'),
+      'node:path': path.resolve(__dirname, './node_modules/path'),
+      'node:fs': path.resolve(__dirname, './src/shims/fs'),
     },
   },
   define: {
@@ -127,6 +137,8 @@ export default defineConfig({
         path.resolve(__dirname, './playwright/packages/playwright/bundles/*/src/**/*'),
         path.resolve(__dirname, './playwright/packages/playwright-core/src/**/*'),
         path.resolve(__dirname, './playwright/packages/playwright-core/bundles/*/src/**/*'),
+        path.resolve(__dirname, './playwright/packages/utils/**/*'),
+        path.resolve(__dirname, './playwright/packages/isomorphic/**/*'),
         /node_modules/,
       ],
     }

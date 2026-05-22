@@ -29,7 +29,7 @@ import { generateCode } from 'playwright-core/lib/server/codegen/language';
 import { collapseActions } from 'playwright-core/lib/server/recorder/recorderUtils';
 import type { Crx } from '../crx';
 import type { LanguageGeneratorOptions } from 'playwright-core/lib/server/codegen/types';
-import { serverSideCallMetadata } from 'playwright-core/lib/server';
+import { nullProgress } from 'playwright-core/lib/server/progress';
 
 export type RecorderMessage = { type: 'recorder' } & (
   | { method: 'resetCallLogs' }
@@ -318,7 +318,7 @@ export class CrxRecorderApp extends EventEmitter {
       const incognitoCrxApp = await this._crx.get({ incognito });
       await incognitoCrxApp?.close({ closeWindows: true });
     }
-    const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito }, serverSideCallMetadata());
+    const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito });
     await this._crx.player.run(crxApp._context, this._getActions());
   }
 

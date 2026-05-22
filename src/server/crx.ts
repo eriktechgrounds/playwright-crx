@@ -15,7 +15,7 @@
  */
 
 import type * as channels from '@protocol/channels';
-import { RecentLogsCollector } from 'playwright-core/lib/server/utils/debugLogger';
+import { RecentLogsCollector } from 'playwright-core/lib/utils/debugLogger';
 import type { BrowserOptions, BrowserProcess } from 'playwright-core/lib/server/browser';
 import { CRBrowser, CRBrowserContext } from 'playwright-core/lib/server/chromium/crBrowser';
 import type { CRPage } from 'playwright-core/lib/server/chromium/crPage';
@@ -24,7 +24,7 @@ import { SdkObject } from 'playwright-core/lib/server/instrumentation';
 import { Page } from 'playwright-core/lib/server/page';
 import type { Playwright } from 'playwright-core/lib/server/playwright';
 import { Recorder } from 'playwright-core/lib/server/recorder';
-import { assert } from 'playwright-core/lib/utils';
+import { assert } from '@isomorphic/assert';
 import type * as crxchannels from '../protocol/channels';
 import { CrxRecorderApp } from './recorder/crxRecorderApp';
 import { CrxTransport } from './transport/crxTransport';
