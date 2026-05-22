@@ -117,6 +117,26 @@ npm ci
 npm run build
 ```
 
+## Changelog
+
+### v0.16.0
+
+- Updated Playwright to v1.60.0
+- feat: save, load, export and import recorded scripts
+- feat: step-by-step execution in the player with per-line progress tracking
+- fix: `crxApp.show()` launching in Popup mode could trigger a 'Maximum call stack size exceeded' error
+- fix: context menu creation and dispatcher initialization
+- refactor: add shims for remote server modules; update Vite config to avoid circular dependencies
+- refactor: selector validation before processing; refresh sources on code change
+
+### v0.15.0
+
+- Updated Playwright to v1.48.0 → v1.50.0
+- Side panel support (can be disabled in options, falls back to popup)
+- Player supports all supported languages via internal JSONL format
+- Command shortcuts (`Alt+Shift+R` record, `Alt+Shift+C` inspect)
+- Options page: default language, testID attribute, side panel toggle
+
 ## Updating Playwright
 
 Playwright is nested as a git subtree.
