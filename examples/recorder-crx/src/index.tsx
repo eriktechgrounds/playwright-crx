@@ -22,5 +22,8 @@ import { CrxRecorder } from './crxRecorder';
 
 (async () => {
   applyTheme();
+  // Stub sendCommand before render so Recorder's mount useEffect doesn't crash.
+  // CrxRecorder.useEffect installs the real port-backed implementation.
+  window.sendCommand = async () => {};
   ReactDOM.createRoot(document.querySelector('#root')!).render(<CrxRecorder />);
 })();
