@@ -66,6 +66,8 @@ export const CrxRecorder: React.FC = ({
   const [settings, setSettings] = React.useState<CrxSettings>(defaultSettings);
   const [sources, setSources] = React.useState<Source[]>([]);
   const [selectedFileId, setSelectedFileId] = React.useState<string>(defaultSettings.targetLanguage);
+  const selectedFileIdRef = React.useRef(selectedFileId);
+  React.useEffect(() => { selectedFileIdRef.current = selectedFileId; }, [selectedFileId]);
 
   React.useEffect(() => {
     const port = chrome.runtime.connect({ name: 'recorder' });
@@ -83,6 +85,7 @@ export const CrxRecorder: React.FC = ({
         case 'setSources':
           setSources(msg.sources);
           window.dispatch?.({ method: 'sourcesUpdated', params: { sources: msg.sources } });
+          window.dispatch?.({ method: 'sourceRevealRequested', params: { sourceId: selectedFileIdRef.current } });
           break;
         case 'resetCallLogs':
           window.dispatch?.({ method: 'callLogsUpdated', params: { callLogs: [] } });
