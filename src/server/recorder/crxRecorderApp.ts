@@ -64,6 +64,7 @@ export class CrxRecorderApp extends EventEmitter {
   private _editedCode?: EditedCode;
   private _recordedActions: ActionInContextWithLocation[] = [];
   private _playInIncognito = false;
+  private _stepIndex: number = 0;
   private _currentCursorPosition: { line: number } | undefined;
 
   constructor(crx: Crx, recorder: Recorder) {
@@ -163,6 +164,7 @@ export class CrxRecorderApp extends EventEmitter {
         this._recordedActions = [];
         this._sources = undefined;
         this._editedCode = undefined;
+        this._stepIndex = 0;
       }
       this.setMode(mode);
     });
@@ -297,8 +299,10 @@ export class CrxRecorderApp extends EventEmitter {
           this._updateLocator(this._currentCursorPosition);
           break;
         case 'resume':
-        case 'step':
           this._run().catch(() => {});
+          break;
+        case 'step':
+          this._step().catch(() => {});
           break;
         case 'setMode':
           const { mode } = params;
@@ -313,6 +317,7 @@ export class CrxRecorderApp extends EventEmitter {
   async _run() {
     if (this._crx.player.isPlaying())
       return;
+    this._stepIndex = 0;
     const incognito = this._playInIncognito;
     if (incognito) {
       const incognitoCrxApp = await this._crx.get({ incognito });
@@ -322,8 +327,27 @@ export class CrxRecorderApp extends EventEmitter {
     await this._crx.player.run(crxApp._context, this._getActions());
   }
 
+  private async _step() {
+    if (this._crx.player.isPlaying())
+      return;
+    const actions = this._getActions();
+    if (this._stepIndex >= actions.length)
+      return;
+    const incognito = this._playInIncognito;
+    if (incognito && this._stepIndex === 0) {
+      const incognitoCrxApp = await this._crx.get({ incognito });
+      await incognitoCrxApp?.close({ closeWindows: true });
+    }
+    const crxApp = await this._crx.get({ incognito }) ?? await this._crx.start({ incognito });
+    const action = actions[this._stepIndex++];
+    await this._crx.player.run(crxApp._context, [action]);
+  }
+
   private _updatePausedState() {
-    const canPlay = !this._recorder._isRecording() && !this._crx.player.isPlaying() && this._recordedActions.length > 0;
+    const actions = this._getActions();
+    if (this._stepIndex >= actions.length)
+      this._stepIndex = 0;
+    const canPlay = !this._recorder._isRecording() && !this._crx.player.isPlaying() && actions.length > 0;
     this._sendMessage({ type: 'recorder', method: 'setPaused', paused: canPlay });
   }
 
