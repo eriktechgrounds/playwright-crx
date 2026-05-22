@@ -25,6 +25,9 @@ import type { CrxSettings } from './settings';
 import { addSettingsChangedListener, defaultSettings, loadSettings, removeSettingsChangedListener } from './settings';
 import ModalContainer, { create as createModal } from 'react-modal-promise';
 import { SaveCodeForm } from './saveCodeForm';
+import { saveScript, deleteScript, getAllScripts, type SavedScript } from './scriptStore';
+import { normalizeUrlToPattern } from './urlMatcher';
+import { ScriptLibrary } from './scriptLibrary';
 import './crxRecorder.css';
 import './form.css';
 
@@ -69,8 +72,15 @@ export const CrxRecorder: React.FC = ({
   const selectedFileIdRef = React.useRef(selectedFileId);
   React.useEffect(() => { selectedFileIdRef.current = selectedFileId; }, [selectedFileId]);
 
+  const portRef = React.useRef<chrome.runtime.Port | null>(null);
+  const [activeTabUrl, setActiveTabUrl] = React.useState<string>('');
+  const [savedScripts, setSavedScripts] = React.useState<SavedScript[]>([]);
+  const [libraryOpen, setLibraryOpen] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   React.useEffect(() => {
     const port = chrome.runtime.connect({ name: 'recorder' });
+    portRef.current = port;
     const onMessage = (msg: any) => {
       if (!('type' in msg) || msg.type !== 'recorder')
         return;
@@ -121,8 +131,16 @@ export const CrxRecorder: React.FC = ({
 
     addSettingsChangedListener(setSettings);
 
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      if (tab?.url)
+        setActiveTabUrl(tab.url);
+    }).catch(() => {});
+
+    getAllScripts().then(setSavedScripts).catch(() => {});
+
     return () => {
       removeSettingsChangedListener(setSettings);
+      portRef.current = null;
       port.disconnect();
     };
   }, []);
@@ -148,25 +166,82 @@ export const CrxRecorder: React.FC = ({
     modal().catch(() => {});
   }, []);
 
-  const saveCode = React.useCallback(() => {
+  const saveToLibrary = React.useCallback(() => {
     if (!settings.experimental)
       return;
+    const code = source?.text;
+    if (!code)
+      return;
+    const modal = createModal(({ isOpen, onResolve, onReject }) =>
+      <Dialog title='Save to Library' isOpen={isOpen} onClose={onReject}>
+        <SaveCodeForm onSubmit={onResolve} suggestedFilename={codegenFilenames[selectedFileId]} currentTabUrl={activeTabUrl} />
+      </Dialog>
+    );
+    modal()
+        .then(({ filename, urlPatterns }) => {
+          saveScript({ name: filename, code, language: selectedFileId, urlPatterns })
+              .then(saved => setSavedScripts(prev => [saved, ...prev.filter(s => s.id !== saved.id)]))
+              .catch(() => {});
+        })
+        .catch(() => {});
+  }, [settings, source, selectedFileId, activeTabUrl]);
 
-    const modal = createModal(({ isOpen, onResolve, onReject }) => {
-      return <Dialog title='Save code' isOpen={isOpen} onClose={onReject}>
+  const exportCurrentCode = React.useCallback(() => {
+    if (!settings.experimental)
+      return;
+    const modal = createModal(({ isOpen, onResolve, onReject }) =>
+      <Dialog title='Export code' isOpen={isOpen} onClose={onReject}>
         <SaveCodeForm onSubmit={onResolve} suggestedFilename={codegenFilenames[selectedFileId]} />
-      </Dialog>;
-    });
+      </Dialog>
+    );
     modal()
         .then(({ filename }) => {
           const code = source?.text;
           if (!code)
             return;
-
           download(filename, code);
         })
         .catch(() => {});
   }, [settings, source, selectedFileId]);
+
+  const loadScriptIntoEditor = React.useCallback((script: SavedScript) => {
+    const port = portRef.current;
+    if (!port)
+      return;
+    port.postMessage({ type: 'recorderEvent', event: 'fileChanged', params: { file: 'playwright-test' } });
+    setSelectedFileId('playwright-test');
+    port.postMessage({ type: 'recorderEvent', event: 'codeChanged', params: { code: script.code } });
+    setLibraryOpen(false);
+  }, []);
+
+  const deleteFromLibrary = React.useCallback((id: string) => {
+    deleteScript(id)
+        .then(() => setSavedScripts(prev => prev.filter(s => s.id !== id)))
+        .catch(() => {});
+  }, []);
+
+  const handleFileImport = React.useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file)
+      return;
+    e.target.value = '';
+    const code = await file.text();
+    const modal = createModal(({ isOpen, onResolve, onReject }) =>
+      <Dialog title='Import Script' isOpen={isOpen} onClose={onReject}>
+        <SaveCodeForm onSubmit={onResolve} suggestedFilename={file.name} currentTabUrl={activeTabUrl} />
+      </Dialog>
+    );
+    modal()
+        .then(({ filename, urlPatterns }) => {
+          saveScript({ name: filename, code, language: 'playwright-test', urlPatterns })
+              .then(saved => {
+                setSavedScripts(prev => [saved, ...prev]);
+                loadScriptIntoEditor(saved);
+              })
+              .catch(() => {});
+        })
+        .catch(() => {});
+  }, [activeTabUrl, loadScriptIntoEditor]);
 
   React.useEffect(() => {
     if (!settings.experimental)
@@ -175,7 +250,7 @@ export const CrxRecorder: React.FC = ({
     const keydownHandler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
-        saveCode();
+        saveToLibrary();
       }
     };
     window.addEventListener('keydown', keydownHandler);
@@ -183,20 +258,33 @@ export const CrxRecorder: React.FC = ({
     return () => {
       window.removeEventListener('keydown', keydownHandler);
     };
-  }, [selectedFileId, settings, saveCode]);
+  }, [selectedFileId, settings, saveToLibrary]);
 
   return <>
     <ModalContainer />
+    <input ref={fileInputRef} type='file' accept='.js,.ts,.py,.cs,.java' style={{ display: 'none' }} onChange={handleFileImport} />
+    <Dialog title='Script Library' isOpen={libraryOpen} onClose={() => setLibraryOpen(false)}>
+      <ScriptLibrary
+        scripts={savedScripts}
+        currentUrl={activeTabUrl}
+        onLoad={loadScriptIntoEditor}
+        onDelete={deleteFromLibrary}
+        onRefresh={() => getAllScripts().then(setSavedScripts).catch(() => {})}
+      />
+    </Dialog>
 
     <div className='recorder'>
       {settings.experimental && <>
         <Toolbar>
-          <ToolbarButton icon='save' title='Save' disabled={false} onClick={saveCode}>Save</ToolbarButton>
+          <ToolbarButton icon='save' title='Save to Library' disabled={false} onClick={saveToLibrary}>Save</ToolbarButton>
+          <ToolbarButton icon='folder-opened' title='Script Library' disabled={false} onClick={() => setLibraryOpen(true)}>Library</ToolbarButton>
           <div style={{ flex: 'auto' }}></div>
           <div className='dropdown'>
             <ToolbarButton icon='tools' title='Tools' disabled={false} onClick={() => {}}></ToolbarButton>
             <div className='dropdown-content right-align'>
               <a href='#' onClick={requestStorageState}>Download storage state</a>
+              <a href='#' onClick={exportCurrentCode}>Export current script</a>
+              <a href='#' onClick={() => fileInputRef.current?.click()}>Import script from file</a>
             </div>
           </div>
           <ToolbarSeparator />
