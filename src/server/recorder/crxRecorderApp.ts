@@ -17,14 +17,16 @@ import type { CallLog, ElementInfo, EventData, Mode, Source, SourceHighlight } f
 import { EventEmitter } from 'events';
 import type { Page } from 'playwright-core/lib/server/page';
 import type { Recorder } from 'playwright-core/lib/server/recorder';
+import { RecorderEvent } from 'playwright-core/lib/server/recorder';
 import type * as channels from '../../protocol/channels';
 import type { ActionInContextWithLocation } from './parser';
 import { PopupRecorderWindow } from './popupRecorderWindow';
 import { SidepanelRecorderWindow } from './sidepanelRecorderWindow';
-import type { IRecorderApp } from 'playwright-core/lib/server/recorder/recorderFrontend';
-import type { ActionInContext, ActionWithSelector } from '@recorder/actions';
+import type { ActionInContext, ActionWithSelector, SignalInContext } from '@recorder/actions';
 import { parse } from './parser';
 import { languageSet } from 'playwright-core/lib/server/codegen/languages';
+import { generateCode } from 'playwright-core/lib/server/codegen/language';
+import { collapseActions } from 'playwright-core/lib/server/recorder/recorderUtils';
 import type { Crx } from '../crx';
 import type { LanguageGeneratorOptions } from 'playwright-core/lib/server/codegen/types';
 import { serverSideCallMetadata } from 'playwright-core/lib/server';
@@ -51,7 +53,7 @@ export interface RecorderWindow {
   hideApp?: () => any;
 }
 
-export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
+export class CrxRecorderApp extends EventEmitter {
   readonly wsEndpointForTest: string | undefined;
   private _crx: Crx;
   readonly _recorder: Recorder;
@@ -72,6 +74,7 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
       this._recorder.clearErrors();
       this.resetCallLogs().catch(() => {});
     });
+    this._wireListeners(recorder);
   }
 
   async open(options?: channels.CrxApplicationShowRecorderParams) {
@@ -87,10 +90,16 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
     this._window.onMessage = this._onMessage.bind(this);
     this._window.hideApp  = this._hide.bind(this);
 
+    // reset recorded actions for fresh session
+    this._recordedActions = [];
+    this._sources = undefined;
+    this._editedCode = undefined;
+
     // set in recorder before, so that if it opens the recorder UI window, it will already reflect the changes
     this._onMessage({ type: 'recorderEvent', event: 'clear', params: {} });
     this._onMessage({ type: 'recorderEvent', event: 'fileChanged', params: { file: language } });
-    this._recorder.setOutput(language, undefined);
+    const highlighter = [...languageSet()].find(g => g.id === language)?.highlighter ?? 'javascript';
+    this._recorder.setLanguage(highlighter);
     this._recorder.setMode(mode);
 
     if (this._window.isClosed()) {
@@ -139,8 +148,71 @@ export class CrxRecorderApp extends EventEmitter implements IRecorderApp {
     this._sendMessage({ type: 'recorder', method: 'setMode', mode });
   }
 
-  async setRunningFile() {
-    // this doesn't make sense in crx, it only runs recorded files
+  private _wireListeners(recorder: Recorder) {
+    recorder.on(RecorderEvent.PausedStateChanged, (paused: boolean) => {
+      this.setPaused(paused);
+    });
+    recorder.on(RecorderEvent.ModeChanged, (mode: Mode) => {
+      if (mode === 'recording') {
+        // clear accumulated actions when a new recording starts
+        this._recordedActions = [];
+        this._sources = undefined;
+        this._editedCode = undefined;
+      }
+      this.setMode(mode);
+    });
+    recorder.on(RecorderEvent.ElementPicked, (elementInfo: ElementInfo, userGesture?: boolean) => {
+      this.elementPicked(elementInfo, userGesture);
+    });
+    recorder.on(RecorderEvent.CallLogsUpdated, (callLogs: CallLog[]) => {
+      this.updateCallLogs(callLogs);
+    });
+    recorder.on(RecorderEvent.UserSourcesChanged, (sources: Source[]) => {
+      this.setSources(sources);
+    });
+    recorder.on(RecorderEvent.ActionAdded, (action: ActionInContext) => {
+      this._recordedActions.push(action);
+      this._onRecordedActionsChanged();
+    });
+    recorder.on(RecorderEvent.SignalAdded, (signal: SignalInContext) => {
+      const lastAction = this._recordedActions.findLast(a => a.frame.pageGuid === signal.frame.pageGuid);
+      if (lastAction)
+        lastAction.action.signals.push(signal.signal);
+      this._onRecordedActionsChanged();
+    });
+    recorder.on(RecorderEvent.ContextClosed, () => {
+      this.close();
+    });
+  }
+
+  private _onRecordedActionsChanged() {
+    const sources = this._generateSources();
+    this._sources = sources;
+    this.setSources(sources);
+    if (this._recorder._isRecording())
+      this._updateCode(null);
+  }
+
+  private _generateSources(): Source[] {
+    const options: LanguageGeneratorOptions = { browserName: 'chromium', launchOptions: {}, contextOptions: {} };
+    const actions = collapseActions(this._recordedActions);
+    const sources: Source[] = [];
+    for (const lg of languageSet()) {
+      const { header, footer, actionTexts, text } = generateCode(actions, lg, options);
+      sources.push({
+        isRecorded: true,
+        label: lg.name,
+        group: lg.groupName,
+        id: lg.id,
+        text,
+        header,
+        footer,
+        actions: actionTexts,
+        language: lg.highlighter,
+        highlight: [],
+      });
+    }
+    return sources;
   }
 
   async setSources(sources: Source[]) {
