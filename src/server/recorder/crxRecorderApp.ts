@@ -275,6 +275,8 @@ export class CrxRecorderApp extends EventEmitter {
     if (!action || !(action.action as ActionWithSelector).selector)
       return;
     const selector = (action.action as ActionWithSelector).selector;
+    if (!selector.trim())
+      return;
     this.elementPicked({ selector, ariaSnapshot: '' }, false);
     this._onMessage({ type: 'recorderEvent', event: 'highlightRequested', params: { selector } });
   }
@@ -291,9 +293,16 @@ export class CrxRecorderApp extends EventEmitter {
               this.setSources(this._sources);
           }
           break;
-        case 'codeChanged':
+        case 'codeChanged': {
           this._updateCode(params.code);
+          // Refresh sources so the editor displays the newly loaded code immediately.
+          // If no sources exist yet (fresh session, no recording), generate them.
+          const refreshedSources = this._sources ?? this._generateSources();
+          if (!this._sources)
+            this._sources = refreshedSources;
+          this.setSources(refreshedSources);
           break;
+        }
         case 'cursorActivity':
           this._currentCursorPosition = params.position;
           this._updateLocator(this._currentCursorPosition);
